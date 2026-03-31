@@ -8,4 +8,4 @@ outputs/
 .DS_Store
 chat_history.json
 feedback.csv
-secrets.toml
+secrets.toml.env
