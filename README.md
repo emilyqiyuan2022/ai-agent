@@ -60,16 +60,16 @@ the agent decides *which* tools to use, *in what order*, with *no predefined scr
 
 ```mermaid
 graph TD
-    U[User Task] --> A[agent.py\nReAct Loop]
-    A -->|tool_use| T[tools.py\nTool Dispatcher]
-    T --> S[web_search\nDuckDuckGo]
-    T --> C[calculate\nmath eval]
-    T --> R[read_file\noutputs/]
-    T --> W[write_file\noutputs/]
+    U[User Task] --> A[agent.py - ReAct Loop]
+    A -->|tool_use| T[tools.py - Dispatcher]
+    T --> S[web_search - DuckDuckGo]
+    T --> C[calculate - math eval]
+    T --> R[read_file - outputs dir]
+    T --> W[write_file - outputs dir]
     T --> D[get_datetime]
     T -->|tool_result| A
     A -->|end_turn| O[Final Answer]
-    O --> APP[app.py\nStreamlit UI]
+    O --> APP[app.py - Streamlit UI]
 ```
 
 **Tech Stack:**
@@ -146,13 +146,15 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 ## Deploying to Streamlit Cloud
 
 1. Push this repo to GitHub (confirm `.env` is listed in `.gitignore`)
-2. Go to [share.streamlit.io](https://share.streamlit.io) → sign in with GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub
 3. Click **New app** → select your repo → set main file to `app.py`
 4. Click **Advanced settings → Secrets** and paste:
-   ```toml
-   ANTHROPIC_API_KEY = "sk-ant-your-key-here"
-   ```
-5. Click **Deploy** — live in ~3 minutes
+
+```toml
+ANTHROPIC_API_KEY = "sk-ant-your-key-here"
+```
+
+5. Click **Deploy** — live in about 3 minutes
 
 ---
 
@@ -174,36 +176,17 @@ The full report is saved to `outputs/ai_market_report.md`.
 
 ## Key Design Decisions
 
-**Why Claude Tool Use instead of LangChain Agents?**  
+**Why Claude Tool Use instead of LangChain Agents?**
 Claude's native Tool Use gives direct control over the agent loop with no
 abstraction layer — easier to debug, reason about, and explain in interviews.
 
-**Why DuckDuckGo instead of Google/Bing Search API?**  
+**Why DuckDuckGo instead of Google or Bing Search API?**
 Zero setup, no API key, no billing — lets anyone clone and run this immediately.
 
-**Why a 10-iteration cap?**  
-Prevents runaway loops on ambiguous tasks. Most tasks complete in 3–6 iterations;
+**Why a 10-iteration cap?**
+Prevents runaway loops on ambiguous tasks. Most tasks complete in 3 to 6 iterations;
 the cap is a safety net, not a real constraint.
 
-**Why separate `tool_schemas.py`?**  
+**Why separate `tool_schemas.py`?**
 Keeping Claude's tool descriptions separate from the implementation makes it easy
 to update descriptions (which affect Claude's behavior) without touching business logic.
-
----
-
-## Interview Talking Points
-
-- **ReAct pattern**: *"The agent alternates between reasoning and acting — Claude
-  decides which tool to call after observing each result, not from a fixed script."*
-- **Tool design**: *"I kept tool inputs and outputs as plain strings so Claude can
-  reason about them without needing structured parsing."*
-- **Extensibility**: *"Adding a new tool requires two things: a Python function in
-  `tools.py` and a schema entry in `tool_schemas.py`. Claude picks it up automatically."*
-- **vs RAG project**: *"RAG retrieves from a static knowledge base;
-  the agent dynamically gathers information to complete open-ended tasks."*
-
----
-
-## License
-
-MIT License — use freely as a portfolio template or starting point for your own agent.
