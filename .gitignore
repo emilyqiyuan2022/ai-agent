@@ -9,3 +9,5 @@ outputs/
 chat_history.json
 feedback.csv
 secrets.toml.env
+__pycache__/
+workspace/
