@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+chroma_db/
+outputs/
+.streamlit/secrets.toml
+*.egg-info/
+.DS_Store
+chat_history.json
+feedback.csv
+secrets.toml
