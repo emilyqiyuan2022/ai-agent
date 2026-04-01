@@ -1,289 +1,228 @@
 """
-tools.py - Agent tool definitions
-Includes: web search (DuckDuckGo), file read/write, and code execution
+tools.py — Tool implementations and dispatcher for the Research Agent
+
+Five tools, all free — no extra API keys required:
+  - web_search   : DuckDuckGo search (pip install duckduckgo-search)
+  - calculate    : Safe math evaluation
+  - read_file    : Read from outputs/ directory
+  - write_file   : Write to outputs/ directory
+  - get_datetime : Current timestamp
+
+Run standalone to test all tools:
+    python tools.py
 """
 
-import subprocess
-import tempfile
 import os
-import json
-from pathlib import Path
+import math
 from datetime import datetime
+from pathlib import Path
+from duckduckgo_search import DDGS
 
-# ============================================================
-# Tool Schema Definitions (Claude Tool Use format)
-# ============================================================
-
-TOOLS = [
-    {
-        "name": "web_search",
-        "description": "Search the internet for up-to-date information. Use this when you need real-time data, news, documentation, or any information that requires internet access.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search keywords or question"
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Number of results to return, default is 5",
-                    "default": 5
-                }
-            },
-            "required": ["query"]
-        }
-    },
-    {
-        "name": "file_operation",
-        "description": "Read or write local files. Supports reading file content, writing new files, appending content, listing directory contents, and deleting files.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": ["read", "write", "append", "list", "delete"],
-                    "description": "Operation type: read, write (overwrite), append, list (directory), delete"
-                },
-                "path": {
-                    "type": "string",
-                    "description": "File or directory path (relative to workspace)"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write or append (required for write/append operations)"
-                }
-            },
-            "required": ["operation", "path"]
-        }
-    },
-    {
-        "name": "code_execute",
-        "description": "Execute Python code in a sandboxed environment. Suitable for data processing, math calculations, format conversion, and other computational tasks. Code runs in an isolated process with a timeout limit.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "Python code to execute"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds, default is 10",
-                    "default": 10
-                }
-            },
-            "required": ["code"]
-        }
-    }
-]
+OUTPUT_DIR = "./outputs"
+Path(OUTPUT_DIR).mkdir(exist_ok=True)
 
 
-# ============================================================
-# Tool Execution Functions
-# ============================================================
+# ─────────────────────────────────────────────
+# Tool implementations
+# ─────────────────────────────────────────────
 
-def execute_web_search(query: str, max_results: int = 5) -> dict:
+def web_search(query: str, max_results: int = 4) -> str:
     """
-    Search the web using DuckDuckGo.
-    Requires: pip install duckduckgo-search
+    Search the web using DuckDuckGo. Free, no API key needed.
+
+    Args:
+        query      : Search keywords (3–10 words works best)
+        max_results: Number of results to return (default 4, max 8)
+
+    Returns:
+        Formatted string with title, snippet, and URL for each result.
     """
     try:
-        from ddgs import DDGS
-
         results = []
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("href", ""),
-                    "snippet": r.get("body", "")
-                })
-
+                results.append(
+                    f"Title  : {r['title']}\n"
+                    f"Snippet: {r['body']}\n"
+                    f"URL    : {r['href']}"
+                )
         if not results:
-            return {"success": False, "error": "No results found"}
-
-        return {
-            "success": True,
-            "query": query,
-            "results_count": len(results),
-            "results": results
-        }
-
-    except ImportError:
-        return {
-            "success": False,
-            "error": "Please install duckduckgo-search: pip install duckduckgo-search"
-        }
+            return "No results found. Try different keywords."
+        return "\n\n---\n\n".join(results)
     except Exception as e:
-        return {"success": False, "error": f"Search failed: {str(e)}"}
+        return f"Search error: {e}. Check your internet connection."
 
 
-def execute_file_operation(operation: str, path: str, content: str = None) -> dict:
+def calculate(expression: str) -> str:
     """
-    Perform file read/write operations.
-    Security: Only allows operations within the ./workspace directory.
+    Safely evaluate a mathematical expression.
+
+    Supports: arithmetic, percentages, and math library functions.
+    Examples:
+        calculate("(100 + 200) * 0.15")
+        calculate("math.sqrt(144)")
+        calculate("math.log(1000, 10)")
+
+    Args:
+        expression: A Python math expression as a string.
+
+    Returns:
+        A string showing the expression and its result.
     """
-    workspace = Path("./workspace").resolve()
-    workspace.mkdir(exist_ok=True)
-
-    # Resolve path and enforce workspace boundary
-    target = (workspace / path).resolve()
-    if not str(target).startswith(str(workspace)):
-        return {"success": False, "error": "Security restriction: operations are only allowed within the workspace directory"}
-
     try:
-        if operation == "read":
-            if not target.exists():
-                return {"success": False, "error": f"File not found: {path}"}
-            file_content = target.read_text(encoding="utf-8")
-            return {
-                "success": True,
-                "operation": "read",
-                "path": path,
-                "size": len(file_content),
-                "content": file_content
-            }
-
-        elif operation == "write":
-            if content is None:
-                return {"success": False, "error": "write operation requires a content parameter"}
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-            return {
-                "success": True,
-                "operation": "write",
-                "path": path,
-                "bytes_written": len(content.encode("utf-8"))
-            }
-
-        elif operation == "append":
-            if content is None:
-                return {"success": False, "error": "append operation requires a content parameter"}
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with open(target, "a", encoding="utf-8") as f:
-                f.write(content)
-            return {
-                "success": True,
-                "operation": "append",
-                "path": path,
-                "bytes_appended": len(content.encode("utf-8"))
-            }
-
-        elif operation == "list":
-            list_target = target if target.is_dir() else workspace
-            if not list_target.exists():
-                return {"success": False, "error": f"Directory not found: {path}"}
-            items = []
-            for item in sorted(list_target.iterdir()):
-                items.append({
-                    "name": item.name,
-                    "type": "dir" if item.is_dir() else "file",
-                    "size": item.stat().st_size if item.is_file() else None,
-                    "modified": datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                })
-            return {
-                "success": True,
-                "operation": "list",
-                "path": str(list_target.relative_to(workspace)),
-                "items": items,
-                "count": len(items)
-            }
-
-        elif operation == "delete":
-            if not target.exists():
-                return {"success": False, "error": f"File not found: {path}"}
-            if target.is_dir():
-                return {"success": False, "error": "Directory deletion is not supported"}
-            target.unlink()
-            return {"success": True, "operation": "delete", "path": path}
-
-        else:
-            return {"success": False, "error": f"Unsupported operation: {operation}"}
-
+        allowed = {
+            "__builtins__": {},
+            "math" : math,
+            "abs"  : abs,
+            "round": round,
+            "min"  : min,
+            "max"  : max,
+            "sum"  : sum,
+            "pow"  : pow,
+            "int"  : int,
+            "float": float,
+        }
+        result = eval(expression, allowed)
+        return f"{expression} = {result}"
+    except ZeroDivisionError:
+        return "Error: division by zero."
     except Exception as e:
-        return {"success": False, "error": f"File operation failed: {str(e)}"}
+        return f"Calculation error: {e}. Check the expression format."
 
 
-def execute_code(code: str, timeout: int = 10) -> dict:
+def read_file(filename: str) -> str:
     """
-    Execute Python code in an isolated subprocess.
-    Security: timeout limit + dangerous module blocklist.
+    Read a file from the outputs/ directory.
+
+    Args:
+        filename: File name only — no path needed (e.g. 'report.md')
+
+    Returns:
+        File contents as a string, or an error message with a list
+        of available files if the file does not exist.
     """
-    # Basic security blocklist
-    blocked_keywords = [
-        "import subprocess", "__import__",
-        "rmdir", "shutil.rmtree"
-    ]
-
-    code_lower = code.lower()
-    for keyword in blocked_keywords:
-        if keyword in code_lower:
-            return {
-                "success": False,
-                "error": f"Security restriction: blocked operation '{keyword}'"
-            }
-
+    filepath = Path(OUTPUT_DIR) / Path(filename).name
+    if not filepath.exists():
+        existing = [f.name for f in Path(OUTPUT_DIR).iterdir() if f.is_file()]
+        hint = f"Available files: {existing}" if existing else "outputs/ is empty."
+        return f"File not found: {filename}. {hint}"
     try:
-        # Write code to a temp file and execute it
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py",
-            delete=False, encoding="utf-8"
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
-
-        result = subprocess.run(
-            ["python", tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"}
-        )
-
-        os.unlink(tmp_path)  # Clean up temp file
-
-        return {
-            "success": result.returncode == 0,
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr if result.stderr else None,
-            "code_preview": code[:200] + "..." if len(code) > 200 else code
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": f"Code execution timed out (limit: {timeout}s)"
-        }
+        return filepath.read_text(encoding="utf-8")
     except Exception as e:
-        return {"success": False, "error": f"Execution failed: {str(e)}"}
+        return f"Read error: {e}"
 
 
-# ============================================================
-# Tool Dispatcher (unified entry point)
-# ============================================================
+def write_file(filename: str, content: str) -> str:
+    """
+    Write content to a file in the outputs/ directory.
 
-def dispatch_tool(tool_name: str, tool_input: dict) -> str:
-    """Dispatch tool call to the corresponding function. Returns a JSON string."""
-    if tool_name == "web_search":
-        result = execute_web_search(
-            query=tool_input["query"],
-            max_results=tool_input.get("max_results", 5)
+    Args:
+        filename: File name (e.g. 'report_20250401.md').
+                  Path traversal characters are stripped for safety.
+        content : Text content to write (Markdown supported).
+
+    Returns:
+        Confirmation string with file path and size.
+    """
+    # Safety: strip any path components, write only to OUTPUT_DIR
+    filepath = Path(OUTPUT_DIR) / Path(filename).name
+    try:
+        filepath.write_text(content, encoding="utf-8")
+        size_kb = filepath.stat().st_size / 1024
+        return (
+            f"File saved: {filepath} "
+            f"({size_kb:.1f} KB, {len(content)} characters)"
         )
-    elif tool_name == "file_operation":
-        result = execute_file_operation(
-            operation=tool_input["operation"],
-            path=tool_input["path"],
-            content=tool_input.get("content")
-        )
-    elif tool_name == "code_execute":
-        result = execute_code(
-            code=tool_input["code"],
-            timeout=tool_input.get("timeout", 10)
-        )
-    else:
-        result = {"success": False, "error": f"Unknown tool: {tool_name}"}
+    except Exception as e:
+        return f"Write error: {e}"
 
-    return json.dumps(result, ensure_ascii=False, indent=2)
+
+def get_datetime() -> str:
+    """
+    Return the current date and time.
+    Useful for adding timestamps to generated reports.
+    """
+    return datetime.now().strftime("%B %d, %Y  %H:%M:%S")
+
+
+# ─────────────────────────────────────────────
+# Dispatcher — single entry point for agent.py
+# ─────────────────────────────────────────────
+
+TOOL_FUNCTIONS = {
+    "web_search"  : web_search,
+    "calculate"   : calculate,
+    "read_file"   : read_file,
+    "write_file"  : write_file,
+    "get_datetime": get_datetime,
+}
+
+
+def run_tool(name: str, inputs: dict) -> str:
+    """
+    Execute a tool by name with the given inputs.
+
+    This is the single entry point called by agent.py.
+    Claude passes the tool name and a dict of arguments;
+    this function routes to the correct implementation.
+
+    Args:
+        name  : Tool name (must match a key in TOOL_FUNCTIONS)
+        inputs: Dict of keyword arguments for the tool function
+
+    Returns:
+        Tool result as a plain string.
+    """
+    if name not in TOOL_FUNCTIONS:
+        available = list(TOOL_FUNCTIONS.keys())
+        return f"Unknown tool: '{name}'. Available tools: {available}"
+
+    func = TOOL_FUNCTIONS[name]
+
+    # get_datetime takes no arguments
+    if name == "get_datetime":
+        return func()
+
+    return func(**inputs)
+
+
+# ─────────────────────────────────────────────
+# Standalone tests — run: python tools.py
+# ─────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print("=" * 55)
+    print("  tools.py — standalone tests")
+    print("=" * 55)
+
+    print("\n[1] web_search")
+    result = web_search("Claude AI capabilities 2025", max_results=2)
+    print(result[:300] + "...\n")
+
+    print("[2] calculate")
+    print(calculate("(8500 * 12) * 1.15"))
+    print(calculate("math.sqrt(256)"))
+    print(calculate("round(3.14159, 2)"))
+    print()
+
+    print("[3] get_datetime")
+    print(get_datetime())
+    print()
+
+    print("[4] write_file")
+    print(write_file(
+        "test_report.md",
+        "# Test Report\n\nGenerated by tools.py standalone test.\n"
+    ))
+
+    print("[5] read_file")
+    print(read_file("test_report.md"))
+
+    print("[6] run_tool dispatcher")
+    print(run_tool("calculate", {"expression": "100 * 1.3 ** 3"}))
+    print(run_tool("get_datetime", {}))
+    print(run_tool("unknown_tool", {}))
+
+    print("\n" + "=" * 55)
+    print("  All tests complete.")
+    print("=" * 55)
