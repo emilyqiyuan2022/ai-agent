@@ -3,7 +3,7 @@
 > Give it a task. It searches the web, runs calculations, reads and writes files —
 > then delivers a structured report. All autonomously.
 
-🌐 **[Live Demo](https://ai-agent-tool.streamlit.app/)** &nbsp;|&nbsp; ⭐ Star this repo if it helped you!
+🌐 **[Live Demo](https://ai-agent-tool.streamlit.app/)** &nbsp;|&nbsp;  ⭐ Star this repo if it helped you!
 
 ![Demo](demo.gif)
 
